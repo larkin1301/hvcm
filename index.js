@@ -1,21 +1,31 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const pool = require('./db');
+const mysql = require('mysql2/promise');
 require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
-
-// Serve static files
 app.use(express.static('public'));
 
-// DB ping endpoint
+// Create DB connection pool
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT || 3306,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+// Ping endpoint to confirm app & DB are alive
 app.get('/ping-db', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
-    console.error('DB connection failed:', err);
+    console.error('❌ DB ERROR:', err.message);
     res.status(500).json({ success: false, error: 'Database connection failed' });
   }
 });
@@ -23,12 +33,13 @@ app.get('/ping-db', async (req, res) => {
 // Ingestion endpoint
 app.post('/ingest', async (req, res) => {
   const data = req.body;
+  console.log('Incoming payload:', JSON.stringify(data));
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
-    // Insert/update device info
+    // Device info
     await conn.query(
       `INSERT INTO devices (device_id, cpu_temp, uptime_sec, device_status)
        VALUES (?, ?, ?, 'active')
@@ -58,8 +69,7 @@ app.post('/ingest', async (req, res) => {
 
     // GPS data
     await conn.query(
-      `INSERT INTO gps_data (device_id, latitude, longitude, altitude, speed, course, num_satellites, fix_type, utc_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'INSERT INTO `gps_data` (`device_id`, `latitude`, `longitude`, `altitude`, `speed`, `course`, `num_satellites`, `fix_type`, `utc_time`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         data.device_id,
         data.gps.lat,
@@ -73,7 +83,7 @@ app.post('/ingest', async (req, res) => {
       ]
     );
 
-    // Battery
+    // Battery data
     await conn.query(
       `INSERT INTO battery_data (device_id, voltage, status)
        VALUES (?, ?, ?)`,
@@ -84,14 +94,20 @@ app.post('/ingest', async (req, res) => {
     res.status(200).json({ status: 'success' });
   } catch (err) {
     await conn.rollback();
+    console.error('Insert failed for payload:', JSON.stringify(data));
     console.error(err);
-    res.status(500).json({ error: 'Failed to insert data' });
+    res.status(500).json({ error: 'Failed to insert data', details: err.message });
   } finally {
     conn.release();
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`API running on http://localhost:${PORT}`);
+// Start app (Passenger will inject PORT)
+const port = process.env.PORT;
+if (!port) {
+  console.error('❌ PORT not defined. Set it in Plesk.');
+  process.exit(1);
+}
+app.listen(port, () => {
+  console.log(`✅ API listening on port ${port}`);
 });
