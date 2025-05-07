@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DB Connection Check</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; }
+    #result { font-size: 1.2em; color: green; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Database Connection Test</h1>
+  <p id="result">Checking...</p>
+
+  <script>
+    fetch('/ping-db')
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          document.getElementById('result').textContent =
+            '✅ Connection OK! Server time: ' + data.serverTime;
+        } else {
+          document.getElementById('result').textContent =
+            '❌ Connection failed.';
+          document.getElementById('result').classList.add('error');
+        }
+      })
+      .catch(err => {
+        document.getElementById('result').textContent =
+          '❌ Error: ' + err.message;
+        document.getElementById('result').classList.add('error');
+      });
+  </script>
+</body>
+</html>
