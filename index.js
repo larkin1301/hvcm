@@ -34,6 +34,7 @@ app.use(session({
 // Ping endpoint
 app.get('/ping-db', async (req, res) => {
   try {
+    console.log('Executing SQL:', sql, 'Params:', params);
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
