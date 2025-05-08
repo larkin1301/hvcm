@@ -27,7 +27,13 @@ const pool = mysql.createPool({
 // Session middleware
 app.use(session({
   key: 'hvcm.sid',
-  store: new MySQLStore({}, pool),
+  store: new MySQLStore({}, mysql.createPool({
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT || 3306,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME
+  })),
   secret: process.env.SESSION_SECRET || 'change_me_in_production',
   resave: false,
   saveUninitialized: false
@@ -36,7 +42,13 @@ app.use(session({
 // Ping endpoint
 app.get('/ping-db', async (req, res) => {
   try {
-    
+    const pool = mysql.createPool({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME
+    });
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
@@ -52,6 +64,13 @@ app.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, and password required' });
   }
   try {
+    const pool = mysql.createPool({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME
+    });
     const hash = await bcrypt.hash(password, 10);
     await pool.query(
       'INSERT INTO users (name, email, organisation_id, password_hash) VALUES (?, ?, ?, ?)',
@@ -60,7 +79,7 @@ app.post('/register', async (req, res) => {
     res.sendStatus(201);
   } catch (err) {
     console.error('Registration failed:', err);
-    res.status(500).json({ error: 'Registration failed' });
+    res.status(500).json({ error: 'Registration failed', details: err.message });
   }
 });
 
@@ -68,6 +87,13 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   try {
+    const pool = mysql.createPool({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME
+    });
     const [rows] = await pool.query(
       'SELECT id, role, organisation_id, password_hash FROM users WHERE email = ?',
       [email]
@@ -80,16 +106,11 @@ app.post('/login', async (req, res) => {
     if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    // Establish session
-    req.session.user = {
-      id: user.id,
-      role: user.role,
-      organisation_id: user.organisation_id
-    };
+    req.session.user = { id: user.id, role: user.role, organisation_id: user.organisation_id };
     res.json({ success: true });
   } catch (err) {
     console.error('Login error:', err);
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ error: 'Login failed', details: err.message });
   }
 });
 
