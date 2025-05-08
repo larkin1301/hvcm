@@ -62,9 +62,11 @@
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
       const markers = {};
+      // Build map markers and list, skip duplicates
       const listEl = document.getElementById('list');
 
       devices.forEach(d => {
+        if (markers[d.device_id]) return;
         const latlng = [d.latitude, d.longitude];
         const marker = L.marker(latlng).addTo(map)
           .bindPopup(`<b>${d.device_id}</b><br>Time: ${d.timestamp}`);
