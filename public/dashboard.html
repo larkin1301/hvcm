@@ -36,9 +36,12 @@
   </div>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    // Redirect to login if not authenticated
+    const API_URL = '/api/devices';
+    let map, markers = {};
+
+    // Authentication check and logout
     async function checkAuth() {
-      const res = await fetch('/api/devices');
+      const res = await fetch(API_URL);
       if (res.status === 401) {
         window.location = '/login.html';
         return false;
@@ -51,75 +54,76 @@
         await fetch('/logout');
         window.location = '/login.html';
       });
+      initMap();
+      startPolling();
     });
 
-    (async () => {
-      if (!await checkAuth()) return;
-      const res = await fetch('/api/devices');
+    function initMap() {
+      map = L.map('map').setView([53.432925, -1.267328], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    }
+
+    async function fetchAndUpdate() {
+      const res = await fetch(API_URL);
       const data = await res.json();
       if (!Array.isArray(data)) {
         console.error('Unexpected devices response:', data);
         return;
       }
-
-      // Initialize map
-      const map = L.map('map').setView([51.5, -0.1], 6);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-
-      const markers = {};
+      // Clear existing markers and list
+      Object.values(markers).forEach(m => map.removeLayer(m));
+      markers = {};
       const listEl = document.getElementById('list');
+      listEl.innerHTML = '';
 
       data.forEach(d => {
-        // Skip duplicate entries for a given device ID
+        // Skip duplicates
         if (markers[d.device_id]) return;
-
-        // Human-readable time
+        // Format fields
         const date = new Date(d.timestamp);
         const formattedTime = date.toLocaleString();
-        // Lat/Lon formatting
         const lat = d.latitude.toFixed(6);
         const lon = d.longitude.toFixed(6);
-        // Marker color based on alarm_state
         let color = 'blue';
         if (d.alarm_state === 1) color = 'red';
         else if (d.alarm_state === 2) color = 'yellow';
 
-        // Create circle marker
+        // Add marker
         const marker = L.circleMarker([d.latitude, d.longitude], {
           radius: 8,
           fillColor: color,
           color: color,
           weight: 1,
           fillOpacity: 0.8
-        }).addTo(map)
-          .bindPopup(
-            `<b>${d.device_id}</b><br>` +
-            `Time: ${formattedTime}<br>` +
-            `Alarm: ${d.alarm_state}<br>` +
-            `Lat: ${lat}<br>` +
-            `Lon: ${lon}<br>` +
-            `CPU Temp: ${d.cpu_temp}`
-          );
+        }).addTo(map).bindPopup(
+          `<b>${d.device_id}</b><br>` +
+          `Time: ${formattedTime}<br>` +
+          `Alarm: ${d.alarm_state}<br>` +
+          `Lat: ${lat}, Lon: ${lon}<br>` +
+          `CPU Temp: ${d.cpu_temp}`
+        );
+        markers[d.device_id] = marker;
 
-        // Add to list
+        // Add list item
         const li = document.createElement('li');
         li.innerHTML =
-          `<b>${d.device_id}</b><br>` +
-          `<small>` +
-          `Time: ${formattedTime} | ` +
-          `Alarm: ${d.alarm_state} | ` +
-          `Lat: ${lat} | Lon: ${lon} | ` +
-          `CPU Temp: ${d.cpu_temp}` +
+          `<b>${d.device_id}</b><br><small>` +
+          `Time: ${formattedTime}<br>` +
+          `Alarm: ${d.alarm_state} | Lat: ${lat}, Lon: ${lon} | CPU: ${d.cpu_temp}` +
           `</small>`;
         li.addEventListener('click', () => {
           map.setView([d.latitude, d.longitude], 13);
           marker.openPopup();
         });
         listEl.appendChild(li);
-        // Mark this device_id so future iterations skip it
-        markers[d.device_id] = true;
       });
-    })();
+    }
+
+    function startPolling() {
+      fetchAndUpdate();
+      // Poll every 30 seconds
+      setInterval(fetchAndUpdate, 30000);
+    }
   </script>
 </body>
 </html>
