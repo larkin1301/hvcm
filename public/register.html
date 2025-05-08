@@ -21,11 +21,17 @@
       const data = Object.fromEntries(new FormData(e.target));
       const res = await fetch('/register', {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      if (res.status === 201) alert('Registered! Please login.');
-      else alert('Registration failed');
+      let result = {};
+      try { result = await res.json(); } catch {}
+      if (res.status === 201) {
+        alert('Registered! Redirecting to login.');
+        window.location = '/login.html';
+      } else {
+        alert('Registration failed: ' + (result.details || result.error || res.statusText));
+      }
     });
   </script>
 </body>
