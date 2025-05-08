@@ -3,6 +3,10 @@ const bodyParser = require('body-parser');
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
+const session = require('express-session');
+const MySQLStore = require('express-mysql-session')(session);
+const bcrypt = require('bcrypt');
+
 const app = express();
 app.use(bodyParser.json());
 app.use(express.static('public'));
@@ -18,6 +22,14 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0
 });
+
+app.use(session({
+  key: 'hvcm.sid',
+  store: new MySQLStore({}, pool),
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false
+}));
 
 // Ping endpoint to confirm app & DB are alive
 app.get('/ping-db', async (req, res) => {
@@ -100,6 +112,52 @@ app.post('/ingest', async (req, res) => {
   } finally {
     conn.release();
   }
+});
+
+// Registration endpoint
+app.post('/register', async (req, res) => {
+  const { name, email, organisation_id, password } = req.body;
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query(
+    'INSERT INTO users (name,email,organisation_id,password_hash) VALUES (?,?,?,?)',
+    [name, email, organisation_id, hash]
+  );
+  res.sendStatus(201);
+});
+
+// Login endpoint
+app.post('/login', async (req,res) => {
+  const { email, password } = req.body;
+  const [rows] = await pool.query('SELECT * FROM users WHERE email=?', [email]);
+  if (!rows.length || !await bcrypt.compare(password, rows[0].password_hash)) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  req.session.user = { id: rows[0].id, role: rows[0].role, org: rows[0].organisation_id };
+  res.json({ success: true });
+});
+
+// Auth middleware
+function requireRole(...allowed) {
+  return (req,res,next) => {
+    if (req.session.user && allowed.includes(req.session.user.role)) return next();
+    res.status(403).json({ error: 'Forbidden' });
+  };
+}
+
+// Example protected route
+app.get('/api/devices', requireRole('admin','account_manager','user'), async (req,res) => {
+  const u = req.session.user;
+  let sql = 'SELECT * FROM devices d';
+  let params = [];
+  if (u.role === 'account_manager') {
+    sql += ' WHERE d.device_id IN (SELECT device_id FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE organisation_id=?))';
+    params.push(u.org);
+  } else if (u.role === 'user') {
+    sql += ' WHERE d.device_id IN (SELECT device_id FROM user_devices WHERE user_id=?)';
+    params.push(u.id);
+  }
+  const [devs] = await pool.query(sql, params);
+  res.json(devs);
 });
 
 // Start app (Passenger will inject PORT)
