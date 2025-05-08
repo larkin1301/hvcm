@@ -11,6 +11,11 @@
     html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
     body.dashboard { display: flex; flex-direction: column; }
     header { flex: 0 0 auto; }
+    #main { display: flex; flex: 1 1 auto; overflow: hidden; }
+    #device-list { width: 250px; background: #f8f9fa; overflow-y: auto; border-right: 1px solid #ddd; }
+    #device-list ul { list-style: none; padding: 0; margin: 0; }
+    #device-list li { padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #e9ecef; }
+    #device-list li:hover { background: #e2e6ea; }
     #map { flex: 1 1 auto; }
   </style>
 </head>
@@ -21,7 +26,12 @@
       <button id="logout-btn" style="width:100px; padding:8px 12px; background:#fff; color:#007bff; border:none; border-radius:4px; cursor:pointer;">Logout</button>
     </div>
   </header>
-  <div id="map"></div>
+  <div id="main">
+    <aside id="device-list">
+      <ul id="list"></ul>
+    </aside>
+    <div id="map"></div>
+  </div>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
     // Authentication check: redirect if not logged in
@@ -46,11 +56,28 @@
       if (!await checkAuth()) return;
       const res = await fetch('/api/devices');
       const devices = await res.json();
+
+      // Initialize map
       const map = L.map('map').setView([51.5, -0.1], 6);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+      const markers = {};
+      const listEl = document.getElementById('list');
+
       devices.forEach(d => {
-        L.marker([d.latitude, d.longitude]).addTo(map)
+        const latlng = [d.latitude, d.longitude];
+        const marker = L.marker(latlng).addTo(map)
           .bindPopup(`<b>${d.device_id}</b><br>Time: ${d.timestamp}`);
+        markers[d.device_id] = marker;
+
+        // Create list item
+        const li = document.createElement('li');
+        li.textContent = d.device_id;
+        li.addEventListener('click', () => {
+          map.setView(latlng, 13);
+          marker.openPopup();
+        });
+        listEl.appendChild(li);
       });
     })();
   </script>
