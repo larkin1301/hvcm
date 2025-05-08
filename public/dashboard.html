@@ -69,12 +69,12 @@
         if (markers[d.device_id]) return;
         const latlng = [d.latitude, d.longitude];
         const marker = L.marker(latlng).addTo(map)
-          .bindPopup(`<b>${d.device_id}</b><br>Time: ${d.timestamp}<br>Alarm: ${d.alarm_state}`) ;
+          .bindPopup(`<b>${d.device_id}</b><br>Time: ${d.timestamp}<br>Alarm: ${d.alarm_state}<br>Lat: ${d.latitude}<br>Lon: ${d.longitude}<br>CPU Temp: ${d.cpu_temp}`);
         markers[d.device_id] = marker;
 
         // Create list item
         const li = document.createElement('li');
-        li.innerHTML = `<b>${d.device_id}</b><br><small>Time: ${d.timestamp} | Alarm: ${d.alarm_state}</small>`;
+        li.innerHTML = `<b>${d.device_id}</b><br><small>Time: ${d.timestamp} | Alarm: ${d.alarm_state} | Lat: ${d.latitude} | Lon: ${d.longitude} | CPU Temp: ${d.cpu_temp}</small>`;
         li.addEventListener('click', () => {
           map.setView(latlng, 13);
           marker.openPopup();

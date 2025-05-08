@@ -227,41 +227,56 @@ app.get('/api/debug', requireAuth, (req, res) => {
   res.json({ session: req.session.user });
 });
 
-// GET devices with latest location
+// GET devices with latest location, CPU temp & alarm state
 app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const u = req.session.user;
-  let sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
-             FROM gps_data g
-             JOIN (
-               SELECT device_id, MAX(recorded_at) AS ts
-               FROM gps_data
-               GROUP BY device_id
-             ) AS latest ON g.device_id = latest.device_id AND g.recorded_at = latest.ts`;
+
+  // Base SQL: join latest GPS row with devices to get cpu_temp and alarm_state
+  let sql = `
+    SELECT 
+      g.device_id,
+      g.latitude,
+      g.longitude,
+      g.altitude,
+      g.recorded_at    AS timestamp,
+      d.cpu_temp,
+      g.alarm_state
+    FROM gps_data g
+    JOIN (
+      SELECT device_id, MAX(recorded_at) AS ts
+      FROM gps_data
+      GROUP BY device_id
+    ) AS latest 
+      ON g.device_id = latest.device_id 
+     AND g.recorded_at = latest.ts
+    JOIN devices d 
+      ON d.device_id = g.device_id
+  `;
   const params = [];
-  console.log('Executing SQL:', sql, 'Params:', params);
+
+  // Role‐based filtering
   if (u.role === 'account_manager') {
-    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
-           FROM gps_data g
-           JOIN (
-             SELECT device_id, MAX(recorded_at) AS ts FROM gps_data GROUP BY device_id
-           ) AS latest ON g.device_id = latest.device_id AND g.recorded_at = latest.ts
-           WHERE g.device_id IN (
-             SELECT device_id FROM user_devices WHERE user_id IN (
-               SELECT id FROM users WHERE organisation_id = ?
-             )
-           )`;
+    sql += `
+      WHERE g.device_id IN (
+        SELECT device_id
+        FROM user_devices
+        WHERE user_id IN (
+          SELECT id FROM users WHERE organisation_id = ?
+        )
+      )
+    `;
     params.push(u.organisation_id);
   } else if (u.role === 'user') {
-    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
-           FROM gps_data g
-           JOIN (
-             SELECT device_id, MAX(recorded_at) AS ts FROM gps_data GROUP BY device_id
-           ) AS latest ON g.device_id = latest.device_id AND g.recorded_at = latest.ts
-           WHERE g.device_id IN (
-             SELECT device_id FROM user_devices WHERE user_id = ?
-           )`;
+    sql += `
+      WHERE g.device_id IN (
+        SELECT device_id
+        FROM user_devices
+        WHERE user_id = ?
+      )
+    `;
     params.push(u.id);
   }
+
   try {
     const [rows] = await pool.query(sql, params);
     res.json(rows);
@@ -270,6 +285,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     res.status(500).json({ error: 'Failed to fetch devices', details: err.message });
   }
 });
+
 
 // GET history for a specific device
 app.get('/api/device/:device_id/history', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
