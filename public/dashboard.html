@@ -5,22 +5,41 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard - HVC Monitor</title>
+  <link rel="stylesheet" href="/style.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <style>#map { width: 100%; height: 90vh; }</style>
-  <link rel="stylesheet" href="/style.css">
 </head>
 <body class="dashboard">
-  <h1>Device Dashboard</h1>
+  <header>
+    <div style="display:flex; justify-content: space-between; align-items: center; padding: 0 20px;">
+      <span>Device Dashboard</span>
+      <button id="logout-btn" style="padding:8px 12px; background:#fff; color:#007bff; border:none; border-radius:4px; cursor:pointer;">Logout</button>
+    </div>
+  </header>
   <div id="map"></div>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    async function fetchDevices() {
-      const res = await fetch('/api/devices');
-      if (!res.ok) { alert('Failed to load devices'); return []; }
-      return await res.json();
+    // Authentication check: redirect if not logged in
+    async function checkAuth() {
+      const res = await fetch('/api/devices', { method: 'GET' });
+      if (res.status === 401) {
+        window.location = '/login.html';
+        return false;
+      }
+      return true;
     }
+
+    // Logout handler
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('logout-btn').addEventListener('click', async () => {
+        await fetch('/logout');
+        window.location = '/login.html';
+      });
+    });
+
     (async () => {
-      const devices = await fetchDevices();
+      if (!await checkAuth()) return;
+      const res = await fetch('/api/devices');
+      const devices = await res.json();
       const map = L.map('map').setView([51.5, -0.1], 6);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
       devices.forEach(d => {
