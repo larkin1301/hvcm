@@ -1,14 +1,10 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const mysql = require('mysql2/promise');
-require('dotenv').config();
-
 const session = require('express-session');
 const MySQLStore = require('express-mysql-session')(session);
 const bcrypt = require('bcryptjs');
-
-// use an environment variable, or fall back to a safe default
-const SESSION_SECRET = process.env.SESSION_SECRET || 'change_me_in_production';
+require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
@@ -26,23 +22,84 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
+// Session middleware
 app.use(session({
   key: 'hvcm.sid',
   store: new MySQLStore({}, pool),
-  secret: SESSION_SECRET, //secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || 'change_me_in_production',
   resave: false,
   saveUninitialized: false
 }));
 
-// Ping endpoint to confirm app & DB are alive
+// Ping endpoint
 app.get('/ping-db', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
-    console.error('❌ DB ERROR:', err.message);
+    console.error('DB connection failed:', err);
     res.status(500).json({ success: false, error: 'Database connection failed' });
   }
+});
+
+// Registration endpoint
+app.post('/register', async (req, res) => {
+  const { name, email, organisation_id, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email, and password required' });
+  }
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query(
+      'INSERT INTO users (name, email, organisation_id, password_hash) VALUES (?, ?, ?, ?)',
+      [name, email, organisation_id || null, hash]
+    );
+    res.sendStatus(201);
+  } catch (err) {
+    console.error('Registration failed:', err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login endpoint
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const [rows] = await pool.query(
+      'SELECT id, role, organisation_id, password_hash FROM users WHERE email = ?',
+      [email]
+    );
+    if (!rows.length) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const user = rows[0];
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    // Establish session
+    req.session.user = {
+      id: user.id,
+      role: user.role,
+      organisation_id: user.organisation_id
+    };
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Logout endpoint
+app.get('/logout', (req, res) => {
+  req.session.destroy(err => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    res.clearCookie('hvcm.sid');
+    res.sendStatus(200);
+  });
 });
 
 // Ingestion endpoint
@@ -117,58 +174,8 @@ app.post('/ingest', async (req, res) => {
   }
 });
 
-// Registration endpoint
-app.post('/register', async (req, res) => {
-  const { name, email, organisation_id, password } = req.body;
-  const hash = await bcrypt.hash(password, 10);
-  await pool.query(
-    'INSERT INTO users (name,email,organisation_id,password_hash) VALUES (?,?,?,?)',
-    [name, email, organisation_id, hash]
-  );
-  res.sendStatus(201);
-});
-
-// Login endpoint
-app.post('/login', async (req,res) => {
-  const { email, password } = req.body;
-  const [rows] = await pool.query('SELECT * FROM users WHERE email=?', [email]);
-  if (!rows.length || !await bcrypt.compare(password, rows[0].password_hash)) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  req.session.user = { id: rows[0].id, role: rows[0].role, org: rows[0].organisation_id };
-  res.json({ success: true });
-});
-
-// Auth middleware
-function requireRole(...allowed) {
-  return (req,res,next) => {
-    if (req.session.user && allowed.includes(req.session.user.role)) return next();
-    res.status(403).json({ error: 'Forbidden' });
-  };
-}
-
-// Example protected route
-app.get('/api/devices', requireRole('admin','account_manager','user'), async (req,res) => {
-  const u = req.session.user;
-  let sql = 'SELECT * FROM devices d';
-  let params = [];
-  if (u.role === 'account_manager') {
-    sql += ' WHERE d.device_id IN (SELECT device_id FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE organisation_id=?))';
-    params.push(u.org);
-  } else if (u.role === 'user') {
-    sql += ' WHERE d.device_id IN (SELECT device_id FROM user_devices WHERE user_id=?)';
-    params.push(u.id);
-  }
-  const [devs] = await pool.query(sql, params);
-  res.json(devs);
-});
-
-// Start app (Passenger will inject PORT)
-const port = process.env.PORT;
-if (!port) {
-  console.error('❌ PORT not defined. Set it in Plesk.');
-  process.exit(1);
-}
+// Start the server
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`✅ API listening on port ${port}`);
+  console.log(`API running on port ${port}`);
 });
