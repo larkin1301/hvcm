@@ -8,22 +8,24 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-    body.dashboard { display: flex; flex-direction: column; }
-    header { flex: 0 0 auto; }
-    #main { display: flex; flex: 1 1 auto; overflow: hidden; }
-    #device-list { width: 250px; background: #f8f9fa; overflow-y: auto; border-right: 1px solid #ddd; }
-    #device-list ul { list-style: none; padding: 0; margin: 0; }
-    #device-list li { padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #e9ecef; }
-    #device-list li:hover { background: #e2e6ea; }
-    #map { flex: 1 1 auto; }
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; }
+    body.dashboard { display:flex; flex-direction:column; }
+    header { flex:0 0 auto; background:#007bff; color:#fff; padding:16px; }
+    header .header-inner { display:flex; justify-content:space-between; align-items:center; }
+    header button { width:100px; padding:8px; background:#fff; color:#007bff; border:none; border-radius:4px; cursor:pointer; }
+    #main { display:flex; flex:1 1 auto; }
+    #device-list { width:250px; background:#f8f9fa; overflow-y:auto; border-right:1px solid #ddd; }
+    #device-list ul { list-style:none; margin:0; padding:0; }
+    #device-list li { padding:10px 15px; cursor:pointer; border-bottom:1px solid #e9ecef; }
+    #device-list li:hover { background:#e2e6ea; }
+    #map { flex:1 1 auto; }
   </style>
 </head>
 <body class="dashboard">
   <header>
-    <div style="display:flex; justify-content: space-between; align-items: center; padding: 0 20px;">
+    <div class="header-inner">
       <span>Device Dashboard</span>
-      <button id="logout-btn" style="width:100px; padding:8px 12px; background:#fff; color:#007bff; border:none; border-radius:4px; cursor:pointer;">Logout</button>
+      <button id="logout-btn">Logout</button>
     </div>
   </header>
   <div id="main">
@@ -34,9 +36,9 @@
   </div>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    // Authentication check: redirect if not logged in
+    // Redirect to login if not authenticated
     async function checkAuth() {
-      const res = await fetch('/api/devices', { method: 'GET' });
+      const res = await fetch('/api/devices');
       if (res.status === 401) {
         window.location = '/login.html';
         return false;
@@ -44,7 +46,6 @@
       return true;
     }
 
-    // Logout handler
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('logout-btn').addEventListener('click', async () => {
         await fetch('/logout');
@@ -55,10 +56,9 @@
     (async () => {
       if (!await checkAuth()) return;
       const res = await fetch('/api/devices');
-      const devices = await res.json();
-      if (!Array.isArray(devices)) {
-        console.error('Invalid devices response:', devices);
-        alert('Error loading devices. See console for details.');
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        console.error('Unexpected devices response:', data);
         return;
       }
 
@@ -67,21 +67,49 @@
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
       const markers = {};
-      // Build map markers and list, skip duplicates
       const listEl = document.getElementById('list');
 
-      devices.forEach(d => {
-        if (markers[d.device_id]) return;
-        const latlng = [d.latitude, d.longitude];
-        const marker = L.marker(latlng).addTo(map)
-          .bindPopup(`<b>${d.device_id}</b><br>Time: ${d.timestamp}<br>Alarm: ${d.alarm_state}<br>Lat: ${d.latitude}<br>Lon: ${d.longitude}<br>CPU Temp: ${d.cpu_temp}`);
-        markers[d.device_id] = marker;
+      data.forEach(d => {
+        // Human-readable time
+        const date = new Date(d.timestamp);
+        const formattedTime = date.toLocaleString();
+        // Lat/Lon formatting
+        const lat = d.latitude.toFixed(6);
+        const lon = d.longitude.toFixed(6);
+        // Marker color based on alarm_state
+        let color = 'blue';
+        if (d.alarm_state === 1) color = 'red';
+        else if (d.alarm_state === 2) color = 'yellow';
 
-        // Create list item
+        // Create circle marker
+        const marker = L.circleMarker([d.latitude, d.longitude], {
+          radius: 8,
+          fillColor: color,
+          color: color,
+          weight: 1,
+          fillOpacity: 0.8
+        }).addTo(map)
+          .bindPopup(
+            `<b>${d.device_id}</b><br>` +
+            `Time: ${formattedTime}<br>` +
+            `Alarm: ${d.alarm_state}<br>` +
+            `Lat: ${lat}<br>` +
+            `Lon: ${lon}<br>` +
+            `CPU Temp: ${d.cpu_temp}`
+          );
+
+        // Add to list
         const li = document.createElement('li');
-        li.innerHTML = `<b>${d.device_id}</b><br><small>Time: ${d.timestamp} | Alarm: ${d.alarm_state} | Lat: ${d.latitude} | Lon: ${d.longitude} | CPU Temp: ${d.cpu_temp}</small>`;
+        li.innerHTML =
+          `<b>${d.device_id}</b><br>` +
+          `<small>` +
+          `Time: ${formattedTime} | ` +
+          `Alarm: ${d.alarm_state} | ` +
+          `Lat: ${lat} | Lon: ${lon} | ` +
+          `CPU Temp: ${d.cpu_temp}` +
+          `</small>`;
         li.addEventListener('click', () => {
-          map.setView(latlng, 13);
+          map.setView([d.latitude, d.longitude], 13);
           marker.openPopup();
         });
         listEl.appendChild(li);
