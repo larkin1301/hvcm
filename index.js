@@ -174,6 +174,62 @@ app.post('/ingest', async (req, res) => {
   }
 });
 
+// Auth middleware
+function requireAuth(req, res, next) {
+  if (req.session.user) return next();
+  return res.status(401).json({ error: 'Unauthorized' });
+}
+
+function requireRole(...allowed) {
+  return (req, res, next) => {
+    if (req.session.user && allowed.includes(req.session.user.role)) return next();
+    return res.status(403).json({ error: 'Forbidden' });
+  };
+}
+
+// GET devices with latest location
+app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
+  const u = req.session.user;
+  let sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
+             FROM gps_data g
+             JOIN (
+               SELECT device_id, MAX(timestamp) AS ts
+               FROM gps_data
+               GROUP BY device_id
+             ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts`;
+  const params = [];
+  if (u.role === 'account_manager') {
+    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
+           FROM gps_data g
+           JOIN (
+             SELECT device_id, MAX(timestamp) AS ts FROM gps_data GROUP BY device_id
+           ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts
+           WHERE g.device_id IN (
+             SELECT device_id FROM user_devices WHERE user_id IN (
+               SELECT id FROM users WHERE organisation_id = ?
+             )
+           )`;
+    params.push(u.organisation_id);
+  } else if (u.role === 'user') {
+    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
+           FROM gps_data g
+           JOIN (
+             SELECT device_id, MAX(timestamp) AS ts FROM gps_data GROUP BY device_id
+           ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts
+           WHERE g.device_id IN (
+             SELECT device_id FROM user_devices WHERE user_id = ?
+           )`;
+    params.push(u.id);
+  }
+  try {
+    const [rows] = await pool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching devices:', err);
+    res.status(500).json({ error: 'Failed to fetch devices' });
+  }
+});
+
 // Start the server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
