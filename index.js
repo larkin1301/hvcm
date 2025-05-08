@@ -49,6 +49,16 @@ app.get('/ping-db', async (req, res) => {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME
     });
+    // Validate organisation_id if provided
+    if (organisation_id) {
+      const [orgRows] = await pool.query(
+        'SELECT id FROM organisations WHERE id = ?',
+        [organisation_id]
+      );
+      if (orgRows.length === 0) {
+        return res.status(400).json({ error: 'Invalid organisation_id' });
+      }
+    }
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
