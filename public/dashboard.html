@@ -70,6 +70,9 @@
       const listEl = document.getElementById('list');
 
       data.forEach(d => {
+        // Skip duplicate entries for a given device ID
+        if (markers[d.device_id]) return;
+
         // Human-readable time
         const date = new Date(d.timestamp);
         const formattedTime = date.toLocaleString();
@@ -113,6 +116,8 @@
           marker.openPopup();
         });
         listEl.appendChild(li);
+        // Mark this device_id so future iterations skip it
+        markers[d.device_id] = true;
       });
     })();
   </script>
