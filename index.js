@@ -147,10 +147,20 @@ app.post('/ingest', async (req, res) => {
 
     // Device info
     await conn.query(
-      `INSERT INTO devices (device_id, cpu_temp, uptime_sec, device_status)
-       VALUES (?, ?, ?, 'active')
-       ON DUPLICATE KEY UPDATE cpu_temp = VALUES(cpu_temp), uptime_sec = VALUES(uptime_sec)`,
-      [data.device_id, data.cpu_temp, data.uptime_sec]
+      `INSERT INTO devices
+         (device_id, cpu_temp, uptime_sec, device_status, alarm_state)
+       VALUES (?, ?, ?, 'active', ?)
+       ON DUPLICATE KEY UPDATE
+         cpu_temp    = VALUES(cpu_temp),
+         uptime_sec  = VALUES(uptime_sec),
+         alarm_state = VALUES(alarm_state)`,
+      [
+        data.device_id,
+        data.cpu_temp,
+        data.uptime_sec,
+        // use incoming flag or default to 0
+        typeof data.alarm_state !== 'undefined' ? data.alarm_state : 0
+      ]
     );
 
     // Modem data
@@ -227,44 +237,40 @@ app.get('/api/debug', requireAuth, (req, res) => {
   res.json({ session: req.session.user });
 });
 
-// GET devices with latest location, CPU temp & alarm state
+// GET devices with latest location, CPU temp & alarm_state from devices
 app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const u = req.session.user;
 
-  // Base SQL: latest GPS row per device, plus CPU temp and alarm_state
   let sql = `
     SELECT
       g.device_id,
       g.latitude,
       g.longitude,
       g.altitude,
-      g.recorded_at    AS timestamp,
-      COALESCE(d.cpu_temp, 0)    AS cpu_temp,
-      COALESCE(g.alarm_state, 0) AS alarm_state
+      g.recorded_at AS timestamp,
+      COALESCE(d.cpu_temp,  0) AS cpu_temp,
+      COALESCE(d.alarm_state, 0) AS alarm_state
     FROM gps_data g
     JOIN (
       SELECT device_id, MAX(recorded_at) AS ts
       FROM gps_data
       GROUP BY device_id
     ) AS latest
-      ON g.device_id = latest.device_id
+      ON g.device_id  = latest.device_id
      AND g.recorded_at = latest.ts
     LEFT JOIN devices d
       ON d.device_id = g.device_id
   `;
   const params = [];
 
-  // Role‐based filtering
   if (u.role === 'account_manager') {
     sql += `
       WHERE g.device_id IN (
         SELECT device_id
-          FROM user_devices
-         WHERE user_id IN (
-           SELECT id
-             FROM users
-            WHERE organisation_id = ?
-         )
+        FROM user_devices
+        WHERE user_id IN (
+          SELECT id FROM users WHERE organisation_id = ?
+        )
       )
     `;
     params.push(u.organisation_id);
@@ -272,8 +278,8 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     sql += `
       WHERE g.device_id IN (
         SELECT device_id
-          FROM user_devices
-         WHERE user_id = ?
+        FROM user_devices
+        WHERE user_id = ?
       )
     `;
     params.push(u.id);
@@ -287,6 +293,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     res.status(500).json({ error: 'Failed to fetch devices', details: err.message });
   }
 });
+
 
 
 
