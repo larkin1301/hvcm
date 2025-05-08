@@ -34,7 +34,7 @@ app.use(session({
 // Ping endpoint
 app.get('/ping-db', async (req, res) => {
   try {
-    console.log('Executing SQL:', sql, 'Params:', params);
+    
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
@@ -199,6 +199,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
                GROUP BY device_id
              ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts`;
   const params = [];
+  console.log('Executing SQL:', sql, 'Params:', params);
   if (u.role === 'account_manager') {
     sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
            FROM gps_data g
