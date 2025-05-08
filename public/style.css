@@ -1,3 +1,6 @@
+/* public/style.css */
+
+/* Shared form pages (register, login) */
 body {
     font-family: Arial, sans-serif;
     background: #f4f4f4;
@@ -8,12 +11,13 @@ body {
     align-items: center;
     height: 100vh;
   }
-  .container {
-    background: #fff;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    width: 320px;
+  
+  .container form {
+    display: flex;
+    flex-direction: column;
+  }
+  .container form label {
+    margin-bottom: 16px;
   }
   h1 {
     text-align: center;
@@ -62,5 +66,24 @@ body {
   #map {
     width: 100%;
     height: calc(100vh - 64px);
+  }
+  
+  /* Force vertical stacking for all forms */
+  form {
+    display: flex;
+    flex-direction: column;
+  }
+  form > label {
+    margin-bottom: 16px;
+  }
+  
+  /* Ensure container titles appear above forms */
+  .container {
+    display: flex;
+    flex-direction: column;
+  }
+  .container h1 {
+    margin-bottom: 20px;
+    color: #333;
   }
   
