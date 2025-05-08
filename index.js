@@ -219,7 +219,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
                SELECT id FROM users WHERE organisation_id = ?
              )
            )`;
-    params.push(u.organisation_id);(u.organisation_id);
+    params.push(u.organisation_id);
   } else if (u.role === 'user') {
     sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
            FROM gps_data g
@@ -229,7 +229,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
            WHERE g.device_id IN (
              SELECT device_id FROM user_devices WHERE user_id = ?
            )`;
-    params.push(u.id);(u.id);
+    params.push(u.id);
   }
   try {
     const [rows] = await pool.query(sql, params);
@@ -237,6 +237,32 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
   } catch (err) {
     console.error('Error fetching devices:', err);
     res.status(500).json({ error: 'Failed to fetch devices', details: err.message });
+  }
+});
+
+// GET history for a specific device
+app.get('/api/device/:device_id/history', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
+  const { device_id } = req.params;
+  const u = req.session.user;
+  // Base query
+  let sql = 'SELECT latitude, longitude, altitude, recorded_at AS timestamp FROM gps_data WHERE device_id = ?';
+  const params = [device_id];
+  // Apply role-based filters
+  if (u.role === 'account_manager') {
+    sql += ' AND device_id IN (SELECT device_id FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE organisation_id = ?))';
+    params.push(u.organisation_id);
+  } else if (u.role === 'user') {
+    sql += ' AND device_id IN (SELECT device_id FROM user_devices WHERE user_id = ?)';
+    params.push(u.id);
+  }
+  sql += ' ORDER BY recorded_at';
+  console.log('Executing History SQL:', sql, 'Params:', params);
+  try {
+    const [rows] = await pool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching history for device', device_id, err);
+    res.status(500).json({ error: 'Failed to fetch history', details: err.message });
   }
 });
 
