@@ -205,11 +205,11 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
                SELECT device_id, MAX(recorded_at) AS ts
                FROM gps_data
                GROUP BY device_id
-             ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts`;
+             ) AS latest ON g.device_id = latest.device_id AND g.recorded_at = latest.ts`;
   const params = [];
   console.log('Executing SQL:', sql, 'Params:', params);
   if (u.role === 'account_manager') {
-    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
+    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
            FROM gps_data g
            JOIN (
              SELECT device_id, MAX(timestamp) AS ts FROM gps_data GROUP BY device_id
@@ -221,7 +221,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
            )`;
     params.push(u.organisation_id);
   } else if (u.role === 'user') {
-    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
+    sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
            FROM gps_data g
            JOIN (
              SELECT device_id, MAX(timestamp) AS ts FROM gps_data GROUP BY device_id
