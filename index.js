@@ -8,7 +8,9 @@ require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
-app.use(express.static('public'));
+// Serve static files from 'public' directory
+// Note: placed after API routes to avoid catching API calls
+// app.use(express.static('public'));
 
 // Create DB connection pool
 const pool = mysql.createPool({
@@ -188,6 +190,12 @@ function requireRole(...allowed) {
   };
 }
 
+// Debug endpoint to test session and routing
+app.get('/api/debug', requireAuth, (req, res) => {
+  console.log('DEBUG /api/debug user:', req.session.user);
+  res.json({ session: req.session.user });
+});
+
 // GET devices with latest location
 app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const u = req.session.user;
@@ -231,6 +239,9 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     res.status(500).json({ error: 'Failed to fetch devices' });
   }
 });
+
+// Serve frontend static files
+app.use(express.static('public'));
 
 // Start the server
 const port = process.env.PORT || 3000;
