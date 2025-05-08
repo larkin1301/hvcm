@@ -236,7 +236,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     res.json(rows);
   } catch (err) {
     console.error('Error fetching devices:', err);
-    res.status(500).json({ error: 'Failed to fetch devices' });
+    res.status(500).json({ error: 'Failed to fetch devices', details: err.message });
   }
 });
 
