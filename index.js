@@ -212,24 +212,24 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
            FROM gps_data g
            JOIN (
-             SELECT device_id, MAX(timestamp) AS ts FROM gps_data GROUP BY device_id
-           ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts
+             SELECT device_id, MAX(recorded_at) AS ts FROM gps_data GROUP BY device_id
+           ) AS latest ON g.device_id = latest.device_id AND g.recorded_at = latest.ts
            WHERE g.device_id IN (
              SELECT device_id FROM user_devices WHERE user_id IN (
                SELECT id FROM users WHERE organisation_id = ?
              )
            )`;
-    params.push(u.organisation_id);
+    params.push(u.organisation_id);(u.organisation_id);
   } else if (u.role === 'user') {
     sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
            FROM gps_data g
            JOIN (
-             SELECT device_id, MAX(timestamp) AS ts FROM gps_data GROUP BY device_id
-           ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts
+             SELECT device_id, MAX(recorded_at) AS ts FROM gps_data GROUP BY device_id
+           ) AS latest ON g.device_id = latest.device_id AND g.recorded_at = latest.ts
            WHERE g.device_id IN (
              SELECT device_id FROM user_devices WHERE user_id = ?
            )`;
-    params.push(u.id);
+    params.push(u.id);(u.id);
   }
   try {
     const [rows] = await pool.query(sql, params);
