@@ -56,6 +56,11 @@
       if (!await checkAuth()) return;
       const res = await fetch('/api/devices');
       const devices = await res.json();
+      if (!Array.isArray(devices)) {
+        console.error('Invalid devices response:', devices);
+        alert('Error loading devices. See console for details.');
+        return;
+      }
 
       // Initialize map
       const map = L.map('map').setView([51.5, -0.1], 6);
