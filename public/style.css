@@ -20,9 +20,11 @@ body {
     margin-bottom: 16px;
   }
   h1 {
+    display: block;
+    width: 100%;
     text-align: center;
+    margin: 20px 0;
     color: #333;
-    margin-bottom: 20px;
   }
   form label {
     display: block;
