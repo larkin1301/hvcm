@@ -136,7 +136,7 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// Ingestion endpoint
+// Ingestion endpoint (updated to validate alarm_state)
 app.post('/ingest', async (req, res) => {
   const data = req.body;
   console.log('Incoming payload:', JSON.stringify(data));
@@ -145,7 +145,11 @@ app.post('/ingest', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // Device info
+    // Determine safe alarm_state (only 0, 1, 2 allowed)
+    let as = parseInt(data.alarm_state, 10);
+    if (![0, 1, 2].includes(as)) as = 0;
+
+    // Device info (store alarm_state)
     await conn.query(
       `INSERT INTO devices
          (device_id, cpu_temp, uptime_sec, device_status, alarm_state)
@@ -158,8 +162,7 @@ app.post('/ingest', async (req, res) => {
         data.device_id,
         data.cpu_temp,
         data.uptime_sec,
-        // use incoming flag or default to 0
-        typeof data.alarm_state !== 'undefined' ? data.alarm_state : 0
+        as
       ]
     );
 
@@ -172,7 +175,9 @@ app.post('/ingest', async (req, res) => {
 
     // IMU data
     await conn.query(
-      `INSERT INTO imu_data (device_id, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z, temperature)
+      `INSERT INTO imu_data
+         (device_id, accel_x, accel_y, accel_z,
+          gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z, temperature)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.device_id,
@@ -185,7 +190,12 @@ app.post('/ingest', async (req, res) => {
 
     // GPS data
     await conn.query(
-      'INSERT INTO `gps_data` (`device_id`, `latitude`, `longitude`, `altitude`, `speed`, `course`, `num_satellites`, `fix_type`, `utc_time`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO gps_data
+         (
+           device_id, latitude, longitude, altitude,
+           speed, course, num_satellites, fix_type, utc_time
+         )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.device_id,
         data.gps.lat,
