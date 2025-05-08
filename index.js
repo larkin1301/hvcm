@@ -5,7 +5,10 @@ require('dotenv').config();
 
 const session = require('express-session');
 const MySQLStore = require('express-mysql-session')(session);
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
+
+// use an environment variable, or fall back to a safe default
+const SESSION_SECRET = process.env.SESSION_SECRET || 'change_me_in_production';
 
 const app = express();
 app.use(bodyParser.json());
@@ -26,7 +29,7 @@ const pool = mysql.createPool({
 app.use(session({
   key: 'hvcm.sid',
   store: new MySQLStore({}, pool),
-  secret: process.env.SESSION_SECRET,
+  secret: SESSION_SECRET, //secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false
 }));

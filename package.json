@@ -1,20 +1,17 @@
 {
   "name": "hvcm",
   "version": "1.0.0",
-  "description": "highvoltagecablemonitor web infrastructure",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "test":  "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
     "body-parser": "^1.20.2",
     "mysql2": "^3.4.0",
     "dotenv": "^16.3.1",
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "express-mysql-session": "^3.0.3",
     "express-session": "^1.18.1"
   }
