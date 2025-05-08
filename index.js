@@ -199,10 +199,10 @@ app.get('/api/debug', requireAuth, (req, res) => {
 // GET devices with latest location
 app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const u = req.session.user;
-  let sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.timestamp
+  let sql = `SELECT g.device_id, g.latitude, g.longitude, g.altitude, g.recorded_at AS timestamp
              FROM gps_data g
              JOIN (
-               SELECT device_id, MAX(timestamp) AS ts
+               SELECT device_id, MAX(recorded_at) AS ts
                FROM gps_data
                GROUP BY device_id
              ) AS latest ON g.device_id = latest.device_id AND g.timestamp = latest.ts`;
