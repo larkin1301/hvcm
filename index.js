@@ -231,25 +231,25 @@ app.get('/api/debug', requireAuth, (req, res) => {
 app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const u = req.session.user;
 
-  // Base SQL: join latest GPS row with devices to get cpu_temp and alarm_state
+  // Base SQL: latest GPS row per device, plus CPU temp and alarm_state
   let sql = `
-    SELECT 
+    SELECT
       g.device_id,
       g.latitude,
       g.longitude,
       g.altitude,
       g.recorded_at    AS timestamp,
-      d.cpu_temp,
-      g.alarm_state
+      COALESCE(d.cpu_temp, 0)    AS cpu_temp,
+      COALESCE(g.alarm_state, 0) AS alarm_state
     FROM gps_data g
     JOIN (
       SELECT device_id, MAX(recorded_at) AS ts
       FROM gps_data
       GROUP BY device_id
-    ) AS latest 
-      ON g.device_id = latest.device_id 
+    ) AS latest
+      ON g.device_id = latest.device_id
      AND g.recorded_at = latest.ts
-    JOIN devices d 
+    LEFT JOIN devices d
       ON d.device_id = g.device_id
   `;
   const params = [];
@@ -259,10 +259,12 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     sql += `
       WHERE g.device_id IN (
         SELECT device_id
-        FROM user_devices
-        WHERE user_id IN (
-          SELECT id FROM users WHERE organisation_id = ?
-        )
+          FROM user_devices
+         WHERE user_id IN (
+           SELECT id
+             FROM users
+            WHERE organisation_id = ?
+         )
       )
     `;
     params.push(u.organisation_id);
@@ -270,8 +272,8 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     sql += `
       WHERE g.device_id IN (
         SELECT device_id
-        FROM user_devices
-        WHERE user_id = ?
+          FROM user_devices
+         WHERE user_id = ?
       )
     `;
     params.push(u.id);
@@ -285,6 +287,7 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
     res.status(500).json({ error: 'Failed to fetch devices', details: err.message });
   }
 });
+
 
 
 // GET history for a specific device
