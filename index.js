@@ -8,9 +8,6 @@ require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
-// Serve static files from 'public' directory
-// Note: placed after API routes to avoid catching API calls
-// app.use(express.static('public'));
 
 // Create DB connection pool
 const pool = mysql.createPool({
@@ -42,23 +39,6 @@ app.use(session({
 // Ping endpoint
 app.get('/ping-db', async (req, res) => {
   try {
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
-    });
-    // Validate organisation_id if provided
-    if (organisation_id) {
-      const [orgRows] = await pool.query(
-        'SELECT id FROM organisations WHERE id = ?',
-        [organisation_id]
-      );
-      if (orgRows.length === 0) {
-        return res.status(400).json({ error: 'Invalid organisation_id' });
-      }
-    }
     const [rows] = await pool.query('SELECT NOW() AS time');
     res.json({ success: true, serverTime: rows[0].time });
   } catch (err) {
@@ -74,13 +54,6 @@ app.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, and password required' });
   }
   try {
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
-    });
     const hash = await bcrypt.hash(password, 10);
     await pool.query(
       'INSERT INTO users (name, email, organisation_id, password_hash) VALUES (?, ?, ?, ?)',
@@ -97,25 +70,14 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
-    });
     const [rows] = await pool.query(
       'SELECT id, role, organisation_id, password_hash FROM users WHERE email = ?',
       [email]
     );
-    if (!rows.length) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
     const user = rows[0];
     const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
     req.session.user = { id: user.id, role: user.role, organisation_id: user.organisation_id };
     res.json({ success: true });
   } catch (err) {
@@ -136,7 +98,7 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// Ingestion endpoint (updated to validate alarm_state)
+// Ingestion endpoint
 app.post('/ingest', async (req, res) => {
   const data = req.body;
   console.log('Incoming payload:', JSON.stringify(data));
@@ -145,25 +107,16 @@ app.post('/ingest', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // Determine safe alarm_state (only 0, 1, 2 allowed)
+    // Validate and store alarm_state
     let as = parseInt(data.alarm_state, 10);
-    if (![0, 1, 2].includes(as)) as = 0;
+    if (![0,1,2].includes(as)) as = 0;
 
-    // Device info (store alarm_state)
+    // Device info
     await conn.query(
-      `INSERT INTO devices
-         (device_id, cpu_temp, uptime_sec, device_status, alarm_state)
+      `INSERT INTO devices (device_id, cpu_temp, uptime_sec, device_status, alarm_state)
        VALUES (?, ?, ?, 'active', ?)
-       ON DUPLICATE KEY UPDATE
-         cpu_temp    = VALUES(cpu_temp),
-         uptime_sec  = VALUES(uptime_sec),
-         alarm_state = VALUES(alarm_state)`,
-      [
-        data.device_id,
-        data.cpu_temp,
-        data.uptime_sec,
-        as
-      ]
+       ON DUPLICATE KEY UPDATE cpu_temp=VALUES(cpu_temp), uptime_sec=VALUES(uptime_sec), alarm_state=VALUES(alarm_state)`,
+      [data.device_id, data.cpu_temp, data.uptime_sec, as]
     );
 
     // Modem data
@@ -176,8 +129,7 @@ app.post('/ingest', async (req, res) => {
     // IMU data
     await conn.query(
       `INSERT INTO imu_data
-         (device_id, accel_x, accel_y, accel_z,
-          gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z, temperature)
+         (device_id, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, mag_x, mag_y, mag_z, temperature)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.device_id,
@@ -188,14 +140,13 @@ app.post('/ingest', async (req, res) => {
       ]
     );
 
-    // GPS data
+    // GPS data (preserve payload time in recorded_at)
+    const utcArr = data.gps.utc;
+    const timeStr = `${utcArr[0].toString().padStart(2,'0')}:${utcArr[1].toString().padStart(2,'0')}:${utcArr[2].toString().padStart(2,'0')}`;
     await conn.query(
       `INSERT INTO gps_data
-         (
-           device_id, latitude, longitude, altitude,
-           speed, course, num_satellites, fix_type, utc_time
-         )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (device_id, latitude, longitude, altitude, speed, course, num_satellites, fix_type, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
       [
         data.device_id,
         data.gps.lat,
@@ -205,7 +156,7 @@ app.post('/ingest', async (req, res) => {
         data.gps.course,
         data.gps.num_satellites,
         data.gps.fix_type,
-        `${data.gps.utc[0]}:${data.gps.utc[1]}:${data.gps.utc[2]}`
+        timeStr
       ]
     );
 
@@ -220,8 +171,7 @@ app.post('/ingest', async (req, res) => {
     res.status(200).json({ status: 'success' });
   } catch (err) {
     await conn.rollback();
-    console.error('Insert failed for payload:', JSON.stringify(data));
-    console.error(err);
+    console.error('Insert failed for payload:', err);
     res.status(500).json({ error: 'Failed to insert data', details: err.message });
   } finally {
     conn.release();
@@ -231,70 +181,40 @@ app.post('/ingest', async (req, res) => {
 // Auth middleware
 function requireAuth(req, res, next) {
   if (req.session.user) return next();
-  return res.status(401).json({ error: 'Unauthorized' });
+  res.status(401).json({ error: 'Unauthorized' });
 }
-
 function requireRole(...allowed) {
   return (req, res, next) => {
     if (req.session.user && allowed.includes(req.session.user.role)) return next();
-    return res.status(403).json({ error: 'Forbidden' });
+    res.status(403).json({ error: 'Forbidden' });
   };
 }
 
-// Debug endpoint to test session and routing
+// Debug endpoint
 app.get('/api/debug', requireAuth, (req, res) => {
-  console.log('DEBUG /api/debug user:', req.session.user);
   res.json({ session: req.session.user });
 });
 
-// GET devices with latest location, CPU temp & alarm_state from devices
+// GET devices
 app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const u = req.session.user;
-
   let sql = `
-    SELECT
-      g.device_id,
-      g.latitude,
-      g.longitude,
-      g.altitude,
-      g.recorded_at AS timestamp,
-      COALESCE(d.cpu_temp,  0) AS cpu_temp,
-      COALESCE(d.alarm_state, 0) AS alarm_state
+    SELECT g.device_id, g.latitude, g.longitude, g.altitude,
+           g.recorded_at AS timestamp, COALESCE(d.cpu_temp,0) AS cpu_temp,
+           COALESCE(d.alarm_state,0) AS alarm_state
     FROM gps_data g
-    JOIN (
-      SELECT device_id, MAX(recorded_at) AS ts
-      FROM gps_data
-      GROUP BY device_id
-    ) AS latest
-      ON g.device_id  = latest.device_id
-     AND g.recorded_at = latest.ts
-    LEFT JOIN devices d
-      ON d.device_id = g.device_id
+    JOIN ( SELECT device_id, MAX(recorded_at) AS ts FROM gps_data GROUP BY device_id ) AS latest
+      ON g.device_id=latest.device_id AND g.recorded_at=latest.ts
+    LEFT JOIN devices d ON d.device_id=g.device_id
   `;
   const params = [];
-
-  if (u.role === 'account_manager') {
-    sql += `
-      WHERE g.device_id IN (
-        SELECT device_id
-        FROM user_devices
-        WHERE user_id IN (
-          SELECT id FROM users WHERE organisation_id = ?
-        )
-      )
-    `;
+  if (u.role==='account_manager') {
+    sql += ` WHERE g.device_id IN (SELECT device_id FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE organisation_id=?))`;
     params.push(u.organisation_id);
-  } else if (u.role === 'user') {
-    sql += `
-      WHERE g.device_id IN (
-        SELECT device_id
-        FROM user_devices
-        WHERE user_id = ?
-      )
-    `;
+  } else if (u.role==='user') {
+    sql += ` WHERE g.device_id IN (SELECT device_id FROM user_devices WHERE user_id=?)`;
     params.push(u.id);
   }
-
   try {
     const [rows] = await pool.query(sql, params);
     res.json(rows);
@@ -304,40 +224,32 @@ app.get('/api/devices', requireAuth, requireRole('admin','account_manager','user
   }
 });
 
-
-
-
-// GET history for a specific device
+// GET device history
 app.get('/api/device/:device_id/history', requireAuth, requireRole('admin','account_manager','user'), async (req, res) => {
   const { device_id } = req.params;
   const u = req.session.user;
-  // Base query
-  let sql = 'SELECT latitude, longitude, altitude, recorded_at AS timestamp FROM gps_data WHERE device_id = ?';
+  let sql = 'SELECT latitude, longitude, altitude, recorded_at AS timestamp FROM gps_data WHERE device_id=?';
   const params = [device_id];
-  // Apply role-based filters
-  if (u.role === 'account_manager') {
-    sql += ' AND device_id IN (SELECT device_id FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE organisation_id = ?))';
+  if (u.role==='account_manager') {
+    sql += ' AND device_id IN (SELECT device_id FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE organisation_id=?))';
     params.push(u.organisation_id);
-  } else if (u.role === 'user') {
-    sql += ' AND device_id IN (SELECT device_id FROM user_devices WHERE user_id = ?)';
+  } else if (u.role==='user') {
+    sql += ' AND device_id IN (SELECT device_id FROM user_devices WHERE user_id=?)';
     params.push(u.id);
   }
   sql += ' ORDER BY recorded_at';
-  console.log('Executing History SQL:', sql, 'Params:', params);
   try {
     const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
-    console.error('Error fetching history for device', device_id, err);
+    console.error('Error fetching history:', err);
     res.status(500).json({ error: 'Failed to fetch history', details: err.message });
   }
 });
 
-// Serve frontend static files
+// Serve frontend
 app.use(express.static('public'));
 
-// Start the server
+// Start server
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`API running on port ${port}`);
-});
+app.listen(port, () => console.log(`API running on port ${port}`));

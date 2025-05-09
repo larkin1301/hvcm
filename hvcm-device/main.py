@@ -12,6 +12,7 @@ from micropyGPS import MicropyGPS
 # === CONFIG ===
 API_URL = "https://31051221.benlarkin.co.uk/ingest"
 ESTIMATED_MAX_RUNTIME_SEC = 86400  # Estimate full discharge in 24h
+MOVEMENT_THRESHOLD = 1.5  # m/s² deviation for alarm
 
 # UART setup for SIM7028 modem
 modem_uart = machine.UART(1, baudrate=9600, tx=machine.Pin(4), rx=machine.Pin(5))
@@ -29,130 +30,132 @@ def get_mac():
     mac = ubinascii.hexlify(machine.unique_id()).decode()
     return ':'.join(mac[i:i+2] for i in range(0, len(mac), 2))
 
+
+def at(cmd):
+    # Send AT command and read response, handling line endings and decoding errors
+    modem_uart.write((cmd + '').encode())
+    time.sleep(1)
+    resp = b""
+    while modem_uart.any():
+        resp += modem_uart.read()
+    # Decode safely, ignoring undecodable bytes
+    try:
+        decoded = resp.decode('utf-8', 'ignore')
+    except Exception:
+        decoded = ''.join(chr(b) for b in resp)
+    return decoded.strip()
+
+
+def get_modem_info():
+    imei = at('AT+GSN')
+    iccid = at('AT+CCID')
+    operator = at('AT+COPS?')
+    signal = at('AT+CSQ')
+    registration = at('AT+CREG?')
+    cell_info = at('AT+CENG?')
+    return imei, iccid, operator, signal, registration, cell_info
+
+
 def read_imu():
     try:
-        accel = imu_sensor.acceleration
-        gyro = imu_sensor.gyro
-        mag = imu_sensor.magnetic
+        accel = imu_sensor.acceleration  # list of x,y,z in m/s²
+        gyro = imu_sensor.gyro  # list of x,y,z in °/s
+        mag = imu_sensor.magnetic  # list of x,y,z in µT
         temp = imu_sensor.temperature
         return {
-            "accel": [accel[0], accel[1], accel[2]],
-            "gyro": [gyro[0], gyro[1], gyro[2]],
-            "mag": [mag[0], mag[1], mag[2]],
-            "temperature": temp
+            'accel': accel,
+            'gyro': gyro,
+            'mag': mag,
+            'temperature': temp
         }
-    except Exception as e:
-        print("IMU read error:")
-        print(e)
-        return {
-            "accel": [0, 0, 0],
-            "gyro": [0, 0, 0],
-            "mag": [0, 0, 0],
-            "temperature": 0
-        }
+    except:
+        return {'accel':[0,0,0],'gyro':[0,0,0],'mag':[0,0,0],'temperature':0}
+
 
 def read_gps():
-    gps_data = {
-        "lat": 0.0,
-        "lon": 0.0,
-        "altitude": 0,
-        "speed": 0,
-        "course": 0,
-        "num_satellites": 0,
-        "fix_type": 0,
-        "utc": [0, 0, 0]
-    }
-    try:
-        timeout = time.time() + 5  # Read GPS data for 5 seconds
-        while time.time() < timeout:
-            if gps_uart.any():
-                char = gps_uart.read(1)
-                if char:
-                    gps.update(char.decode('utf-8', 'ignore'))
+    data = {'lat':0.0,'lon':0.0,'altitude':0,'speed':0,'course':0,'num_satellites':0,'fix_type':0,'utc':[0,0,0]}
+    timeout = time.time() + 5
+    while time.time() < timeout:
+        if gps_uart.any():
+            char = gps_uart.read(1)
+            if char:
+                gps.update(char.decode('utf-8','ignore'))
+    if gps.latitude and gps.longitude:
+        data['lat'] = gps.latitude[0] * (-1 if gps.latitude[1]=='S' else 1)
+        data['lon'] = gps.longitude[0] * (-1 if gps.longitude[1]=='W' else 1)
+        data['altitude'] = gps.altitude
+        data['speed'] = gps.speed[2]
+        data['course'] = gps.course
+        data['num_satellites'] = gps.satellites_in_use
+        data['fix_type'] = gps.fix_stat
+        data['utc'] = [gps.timestamp[0],gps.timestamp[1],gps.timestamp[2]]
+    return data
 
-        if gps.latitude and gps.longitude:
-            gps_data["lat"] = gps.latitude[0] * (-1 if gps.latitude[1] == 'S' else 1)
-            gps_data["lon"] = gps.longitude[0] * (-1 if gps.longitude[1] == 'W' else 1)
-            gps_data["altitude"] = gps.altitude
-            gps_data["speed"] = gps.speed[2]  # km/h
-            gps_data["course"] = gps.course
-            gps_data["num_satellites"] = gps.satellites_in_use
-            gps_data["utc"] = [gps.timestamp[0], gps.timestamp[1], gps.timestamp[2]]
-            gps_data["fix_type"] = gps.fix_stat
-    except Exception as e:
-        print("GPS read error:")
-        print(e)
-    return gps_data
 
 def estimate_battery():
     uptime = int(time.time())
-    percent = max(0, min(100, 100 - int((uptime / ESTIMATED_MAX_RUNTIME_SEC) * 100)))
-    return percent, "OK" if percent > 20 else "LOW"
+    percent = max(0, min(100, 100 - int((uptime/ESTIMATED_MAX_RUNTIME_SEC)*100)))
+    status = 'OK' if percent>20 else 'LOW'
+    return percent, status
+
+
+def detect_movement(accel):
+    # accel is list [x, y, z], compare magnitude against gravity
+    g = 9.8
+    dx = accel[0]
+    dy = accel[1]
+    dz = accel[2] - g
+    magnitude = (dx*dx + dy*dy + dz*dz)**0.5
+    return magnitude > MOVEMENT_THRESHOLD
+
 
 def create_payload():
     mac = get_mac()
-    cpu_temp = 42.5
-    uptime = int(time.time())
-
-    imei, iccid, operator, signal, reg, cell_info = "", "", "", "", "", ""
+    imei, iccid, operator, signal, reg, cell_info = get_modem_info()
     imu = read_imu()
-    gps = read_gps()
-    battery_percent, battery_status = estimate_battery()
-
+    gpsd = read_gps()
+    batt_pct, batt_stat = estimate_battery()
+    movement = detect_movement(imu['accel'])
+    alarm_state = 1 if movement else 0
     return json.dumps({
-        "device_id": mac,
-        "cpu_temp": cpu_temp,
-        "uptime_sec": uptime,
-        "imei": imei,
-        "iccid": iccid,
-        "operator": operator,
-        "signal_strength": signal,
-        "registration": reg,
-        "cell_info": cell_info,
-        "imu": imu,
-        "gps": gps,
-        "battery": {
-            "voltage": battery_percent,
-            "status": battery_status
-        }
+        'device_id': mac,
+        'cpu_temp': machine.temperature() if hasattr(machine,'temperature') else 0,
+        'uptime_sec': int(time.time()),
+        'imei': imei,
+        'iccid': iccid,
+        'operator': operator,
+        'signal_strength': signal,
+        'registration': reg,
+        'cell_info': cell_info,
+        'imu': imu,
+        'gps': gpsd,
+        'battery': {'voltage': batt_pct, 'status': batt_stat},
+        'alarm_state': alarm_state
     })
 
-def at(cmd):
-    try:
-        modem_uart.write((cmd + '\r\n').encode())
-        time.sleep(2)
-        response = b""
-        while modem_uart.any():
-            response += modem_uart.read()
-        decoded = response.decode('utf-8')
-        print("Response: " + decoded)
-        return decoded.strip()
-    except Exception as err:
-        print("AT command failed: " + cmd)
-        print("Error: " + str(err))
-        return "ERROR"
 
 def send_payload(payload):
-    print("Starting HTTP POST over SIM7028...")
     at('AT+SAPBR=3,1,"CONTYPE","GPRS"')
     at('AT+SAPBR=3,1,"APN","wap.vodafone.co.uk"')
-    at("AT+SAPBR=1,1")
-    at("AT+SAPBR=2,1")
-    at("AT+HTTPINIT")
-    at('AT+HTTPPARA="URL","' + API_URL + '"')
+    at('AT+SAPBR=1,1')
+    at('AT+SAPBR=2,1')
+    at('AT+HTTPINIT')
+    at(f'AT+HTTPPARA="URL","{API_URL}"')
     at('AT+HTTPPARA="CONTENT","application/json"')
-    at('AT+HTTPDATA=' + str(len(payload)) + ',10000')
+    at(f'AT+HTTPDATA={len(payload)},10000')
     time.sleep(1)
     modem_uart.write(payload.encode())
     time.sleep(1)
-    at("AT+HTTPACTION=1")
-    at("AT+HTTPREAD")
-    at("AT+HTTPTERM")
-    at("AT+SAPBR=0,1")
+    at('AT+HTTPACTION=1')
+    at('AT+HTTPREAD')
+    at('AT+HTTPTERM')
+    at('AT+SAPBR=0,1')
+
 
 # === MAIN EXECUTION ===
 payload = create_payload()
+print('Payload:', payload)
 send_payload(payload)
-print("Done. Sleeping for 60s...")
+print('Sleeping for 60s...')
 time.sleep(60)
 
